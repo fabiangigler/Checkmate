@@ -80,7 +80,7 @@ const INTERVAL_UNIT_MULTIPLIERS = [1000, 60000, 3600000, 86400000] as const;
 
 const toIntervalOption = (intervalMs: number): IntervalOption => ({
 	id: intervalMs,
-	name: formatDuration(intervalMs, true),
+	name: formatDuration(intervalMs, { long: true }),
 });
 
 const filterIntervalOptions = (
