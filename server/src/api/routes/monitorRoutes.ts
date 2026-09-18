@@ -14,6 +14,8 @@ export const createMonitorRoutes = (monitorController: IMonitorController): Rout
 
 	// Hardware routes
 	router.get("/hardware/details/:monitorId", monitorController.getHardwareDetailsById);
+	router.get("/hardware/:monitorId/docker-discovery", isAllowed(["admin", "superadmin"]), monitorController.discoverDockerForHardware);
+	router.post("/hardware/:monitorId/docker-monitor", isAllowed(["admin", "superadmin"]), monitorController.createDockerMonitorFromHardware);
 
 	// PageSpeed routes
 	router.get("/pagespeed/details/:monitorId", monitorController.getPageSpeedDetailsById);

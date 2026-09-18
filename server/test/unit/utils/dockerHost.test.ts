@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@jest/globals";
-import { DOCKER_TLS_URL, isCaptureDockerUrl, isDockerSocketUrl, isDockerTlsUrl } from "../../../src/utils/dockerHost.ts";
+import { DOCKER_TLS_URL, isCaptureDockerUrl, isDockerSocketUrl, isDockerTlsUrl, toCaptureDockerUrl } from "../../../src/utils/dockerHost.ts";
 
 describe("isDockerTlsUrl", () => {
 	it.each(["tcp://host", "tcp://host:2376", "https://host", "https://host:2377", "tcp://host/", "tcp://10.0.0.1:2376", "  tcp://host  "])(
@@ -44,6 +44,18 @@ describe("isCaptureDockerUrl", () => {
 		undefined,
 	])("rejects %s", (url) => {
 		expect(isCaptureDockerUrl(url)).toBe(false);
+	});
+});
+
+describe("toCaptureDockerUrl", () => {
+	it("converts a Capture metrics endpoint and preserves its query", () => {
+		expect(toCaptureDockerUrl("https://capture.example.com/api/v1/metrics/?token=value")).toBe(
+			"https://capture.example.com/api/v1/metrics/docker?token=value"
+		);
+	});
+
+	it.each(["https://capture.example.com/api/v1/metrics/cpu", "tcp://host:2376", undefined])("rejects %s", (url) => {
+		expect(toCaptureDockerUrl(url)).toBeNull();
 	});
 });
 

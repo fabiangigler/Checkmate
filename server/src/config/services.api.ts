@@ -14,6 +14,12 @@ import { SharedServices } from "@/config/services.shared.js";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { games } from "gamedig";
+import got from "got";
+import Docker from "dockerode";
+import jmespath from "jmespath";
+import { AdvancedMatcher } from "@/service/network/AdvancedMatcher.js";
+import { HttpProvider } from "@/service/network/HttpProvider.js";
+import { DockerProvider } from "@/service/network/DockerProvider.js";
 
 export interface ApiServices extends SharedServices {
 	worker: IJobScheduler; // control-plane handle only (DBQueueWorker in all-in-one, bare JobScheduler in API-only)
@@ -72,6 +78,8 @@ export const buildApi = (shared: SharedServices, jobScheduler: IJobScheduler): A
 	//  Business services
 	// ***********************
 
+	const httpProvider = new HttpProvider(got, new AdvancedMatcher(jmespath));
+	const dockerProvider = new DockerProvider(logger, Docker, shared.encryptionService, httpProvider);
 	const monitorService = new MonitorService({
 		scheduler: jobScheduler,
 		logger,
@@ -84,6 +92,7 @@ export const buildApi = (shared: SharedServices, jobScheduler: IJobScheduler): A
 		statusPagesRepository,
 		incidentsRepository,
 		encryptionService: shared.encryptionService,
+		dockerProvider,
 	});
 
 	const maintenanceWindowService = new MaintenanceWindowService({

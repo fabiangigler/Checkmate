@@ -72,6 +72,8 @@ const createJobQueueMock = () => ({
 	deleteJob: jest.fn(),
 });
 
+const createDockerProviderMock = () => ({ handle: jest.fn() });
+
 const createEncryptionServiceMock = (overrides: Partial<IEncryptionService> = {}) =>
 	({
 		isConfigured: jest.fn(() => true),
@@ -102,6 +104,21 @@ const makeMonitor = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
+const makeHardwareMonitor = (overrides: Record<string, unknown> = {}) =>
+	makeMonitor({
+		type: "hardware",
+		url: "https://capture.example.com/api/v1/metrics",
+		secret: "capture-secret",
+		notifications: ["notification-1"],
+		tags: ["tag-1"],
+		statusWindowSize: 5,
+		statusWindowThreshold: 60,
+		ignoreTlsErrors: false,
+		proxyMode: "inherit",
+		group: "servers",
+		...overrides,
+	});
+
 const createService = (
 	overrides: {
 		monitorsRepository?: IMonitorsRepository;
@@ -112,6 +129,7 @@ const createService = (
 		dockerLogsRepository?: IDockerLogsRepository;
 		incidentsRepository?: IIncidentsRepository;
 		encryptionService?: IEncryptionService;
+		dockerProvider?: ReturnType<typeof createDockerProviderMock>;
 		jobQueue?: ReturnType<typeof createJobQueueMock>;
 		logger?: ReturnType<typeof createMockLogger>;
 		games?: Record<string, unknown>;
@@ -119,6 +137,7 @@ const createService = (
 ) => {
 	const jobQueue = overrides.jobQueue ?? createJobQueueMock();
 	const logger = overrides.logger ?? createMockLogger();
+	const dockerProvider = overrides.dockerProvider ?? createDockerProviderMock();
 	const service = new MonitorService({
 		scheduler: jobQueue as any,
 		logger: logger as any,
@@ -131,8 +150,9 @@ const createService = (
 		statusPagesRepository: overrides.statusPagesRepository ?? createStatusPagesRepositoryMock(),
 		incidentsRepository: overrides.incidentsRepository ?? createIncidentsRepositoryMock(),
 		encryptionService: overrides.encryptionService ?? createEncryptionServiceMock(),
+		dockerProvider,
 	});
-	return { service, jobQueue, logger };
+	return { service, jobQueue, logger, dockerProvider };
 };
 
 describe("MonitorService", () => {
@@ -188,6 +208,86 @@ describe("MonitorService", () => {
 			const { service } = createService({ monitorsRepository });
 
 			await expect(service.createMonitor(TEAM_ID, USER_ID, {} as any)).rejects.toThrow("Failed to create monitor");
+		});
+	});
+
+	describe("Docker discovery for hardware monitors", () => {
+		it("returns detected containers from the Capture Docker endpoint", async () => {
+			const monitorsRepository = createMonitorsRepositoryMock();
+			(monitorsRepository.findById as jest.Mock).mockResolvedValue(makeHardwareMonitor());
+			(monitorsRepository.findByTeamId as jest.Mock).mockResolvedValue([]);
+			const dockerProvider = createDockerProviderMock();
+			(dockerProvider.handle as jest.Mock).mockResolvedValue({
+				status: true,
+				payload: { summary: { total: 3 } },
+			});
+			const { service } = createService({ monitorsRepository, dockerProvider });
+
+			await expect(service.discoverDockerForHardware({ teamId: TEAM_ID, monitorId: MONITOR_ID })).resolves.toEqual({
+				containerCount: 3,
+				monitorExists: false,
+			});
+			expect(dockerProvider.handle).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "docker", url: "https://capture.example.com/api/v1/metrics/docker" })
+			);
+		});
+
+		it("skips discovery when the Capture endpoint already has a Docker monitor", async () => {
+			const monitorsRepository = createMonitorsRepositoryMock();
+			(monitorsRepository.findById as jest.Mock).mockResolvedValue(makeHardwareMonitor());
+			(monitorsRepository.findByTeamId as jest.Mock).mockResolvedValue([
+				makeMonitor({ type: "docker", url: "https://capture.example.com/api/v1/metrics/docker?all=true" }),
+			]);
+			const dockerProvider = createDockerProviderMock();
+			const { service } = createService({ monitorsRepository, dockerProvider });
+
+			await expect(service.discoverDockerForHardware({ teamId: TEAM_ID, monitorId: MONITOR_ID })).resolves.toEqual({
+				containerCount: 0,
+				monitorExists: true,
+			});
+			expect(dockerProvider.handle).not.toHaveBeenCalled();
+		});
+
+		it("creates a Docker monitor by copying the hardware monitor settings", async () => {
+			const monitorsRepository = createMonitorsRepositoryMock();
+			const hardwareMonitor = makeHardwareMonitor();
+			const createdMonitor = makeMonitor({ id: "docker-1", type: "docker" });
+			(monitorsRepository.findById as jest.Mock).mockResolvedValue(hardwareMonitor);
+			(monitorsRepository.findByTeamId as jest.Mock).mockResolvedValue([]);
+			(monitorsRepository.create as jest.Mock).mockResolvedValue(createdMonitor);
+			const { service, jobQueue } = createService({ monitorsRepository });
+
+			const result = await service.createDockerMonitorFromHardware({ teamId: TEAM_ID, userId: USER_ID, monitorId: MONITOR_ID });
+
+			expect(monitorsRepository.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					name: "Test Monitor Docker",
+					type: "docker",
+					url: "https://capture.example.com/api/v1/metrics/docker",
+					secret: "capture-secret",
+					interval: 60000,
+					notifications: ["notification-1"],
+					tags: ["tag-1"],
+					dockerLogsEnabled: false,
+				}),
+				TEAM_ID,
+				USER_ID
+			);
+			expect(jobQueue.addJob).toHaveBeenCalledWith("docker-1", createdMonitor);
+			expect(result).toBe(createdMonitor);
+		});
+
+		it("rejects duplicate Docker monitor creation", async () => {
+			const monitorsRepository = createMonitorsRepositoryMock();
+			(monitorsRepository.findById as jest.Mock).mockResolvedValue(makeHardwareMonitor());
+			(monitorsRepository.findByTeamId as jest.Mock).mockResolvedValue([
+				makeMonitor({ type: "docker", url: "https://capture.example.com/api/v1/metrics/docker" }),
+			]);
+			const { service } = createService({ monitorsRepository });
+
+			await expect(service.createDockerMonitorFromHardware({ teamId: TEAM_ID, userId: USER_ID, monitorId: MONITOR_ID })).rejects.toMatchObject({
+				status: 409,
+			});
 		});
 	});
 
@@ -1909,6 +2009,7 @@ describe("MonitorService", () => {
 				statusPagesRepository,
 				incidentsRepository,
 				encryptionService: createEncryptionServiceMock(),
+				dockerProvider: createDockerProviderMock(),
 			});
 
 			const result = await service.deleteAllMonitors({ teamId: TEAM_ID });

@@ -34,7 +34,8 @@ import { IJobScheduler } from "@/worker/worker.interface.js";
 import { DateRange } from "@/types/query.js";
 import { IDockerLogsRepository } from "@/domain/docker/docker-log.repository.interface.js";
 import { IEncryptionService } from "@/service/encryption/encryptionService.js";
-import { isDockerTlsUrl } from "@/utils/dockerHost.js";
+import { isDockerTlsUrl, toCaptureDockerUrl } from "@/utils/dockerHost.js";
+import type { DockerProvider } from "@/service/network/DockerProvider.js";
 
 const SERVICE_NAME = "MonitorService";
 
@@ -60,15 +61,22 @@ const computeRestartsInRange = (aggregate: DockerContainerStatsBucket[]): number
 	return restarts;
 };
 
+export interface DockerDiscoveryResult {
+	containerCount: number;
+	monitorExists: boolean;
+}
+
 export interface IMonitorService {
 	// create
 	createMonitor(teamId: string, userId: string, body: Partial<Monitor>): Promise<Monitor>;
+	createDockerMonitorFromHardware(args: { teamId: string; userId: string; monitorId: string }): Promise<Monitor>;
 	createMonitors(monitors: Array<Monitor>): Promise<Monitor[] | null>;
 	addDemoMonitors(args: { userId: string; teamId: string }): Promise<Monitor[]>;
 
 	// read
 	getUptimeDetailsById(args: { teamId: string; monitorId: string; dateRange: DateRange }): Promise<UptimeDetailsResult>;
 	getHardwareDetailsById(args: { teamId: string; monitorId: string; dateRange: DateRange }): Promise<HardwareDetailsResult>;
+	discoverDockerForHardware(args: { teamId: string; monitorId: string }): Promise<DockerDiscoveryResult>;
 	getPageSpeedDetailsById(args: { teamId: string; monitorId: string; dateRange: DateRange }): Promise<PageSpeedDetailsResult>;
 	getDockerDetailsById(args: { teamId: string; monitorId: string; dateRange: DateRange }): Promise<DockerDetailsResult>;
 	getDockerContainerByName(args: {
@@ -147,6 +155,7 @@ export class MonitorService implements IMonitorService {
 	private statusPagesRepository: IStatusPagesRepository;
 	private incidentsRepository: IIncidentsRepository;
 	private encryptionService: IEncryptionService;
+	private dockerProvider: Pick<DockerProvider, "handle">;
 
 	constructor({
 		scheduler,
@@ -160,6 +169,7 @@ export class MonitorService implements IMonitorService {
 		statusPagesRepository,
 		incidentsRepository,
 		encryptionService,
+		dockerProvider,
 	}: {
 		scheduler: IJobScheduler;
 		logger: ILogger;
@@ -172,6 +182,7 @@ export class MonitorService implements IMonitorService {
 		statusPagesRepository: IStatusPagesRepository;
 		incidentsRepository: IIncidentsRepository;
 		encryptionService: IEncryptionService;
+		dockerProvider: Pick<DockerProvider, "handle">;
 	}) {
 		this.scheduler = scheduler;
 		this.logger = logger;
@@ -184,6 +195,7 @@ export class MonitorService implements IMonitorService {
 		this.statusPagesRepository = statusPagesRepository;
 		this.incidentsRepository = incidentsRepository;
 		this.encryptionService = encryptionService;
+		this.dockerProvider = dockerProvider;
 	}
 
 	createMonitor = async (teamId: string, userId: string, body: Monitor): Promise<Monitor> => {
@@ -202,6 +214,79 @@ export class MonitorService implements IMonitorService {
 
 		this.scheduler.addJob(monitor.id, monitor);
 		return monitor;
+	};
+
+	private getHardwareDockerContext = async (teamId: string, monitorId: string) => {
+		const monitor = await this.monitorsRepository.findById(monitorId, teamId);
+		if (monitor.type !== "hardware") {
+			throw new AppError({ message: `${monitor.type} monitors are not supported for Docker discovery`, status: 400 });
+		}
+		const dockerUrl = toCaptureDockerUrl(monitor.url);
+		if (!dockerUrl) {
+			throw new AppError({ message: "Hardware monitor does not use a Capture metrics endpoint", status: 422 });
+		}
+
+		const normalizeUrl = (url: string) => {
+			const parsed = new URL(url);
+			parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+			parsed.searchParams.delete("all");
+			parsed.searchParams.sort();
+			return parsed.toString();
+		};
+		const dockerMonitors = await this.monitorsRepository.findByTeamId(teamId, { type: "docker" }, { includeRecentChecks: false });
+		const existingMonitor = dockerMonitors.find((candidate) => {
+			try {
+				return normalizeUrl(candidate.url) === normalizeUrl(dockerUrl);
+			} catch {
+				return false;
+			}
+		});
+		return { monitor, dockerUrl, existingMonitor };
+	};
+
+	discoverDockerForHardware = async ({ teamId, monitorId }: { teamId: string; monitorId: string }): Promise<DockerDiscoveryResult> => {
+		const { monitor, dockerUrl, existingMonitor } = await this.getHardwareDockerContext(teamId, monitorId);
+		if (existingMonitor) return { containerCount: 0, monitorExists: true };
+
+		const response = await this.dockerProvider.handle({ ...monitor, type: "docker", url: dockerUrl, dockerLogsEnabled: false });
+		const payload = response.payload;
+		return {
+			containerCount: response.status && payload && typeof payload !== "string" ? payload.summary.total : 0,
+			monitorExists: false,
+		};
+	};
+
+	createDockerMonitorFromHardware = async ({
+		teamId,
+		userId,
+		monitorId,
+	}: {
+		teamId: string;
+		userId: string;
+		monitorId: string;
+	}): Promise<Monitor> => {
+		const { monitor, dockerUrl, existingMonitor } = await this.getHardwareDockerContext(teamId, monitorId);
+		if (existingMonitor) {
+			throw new AppError({ message: "A Docker monitor already exists for this Capture endpoint", status: 409 });
+		}
+
+		const nameSuffix = " Docker";
+		return this.createMonitor(teamId, userId, {
+			name: `${monitor.name.slice(0, 50 - nameSuffix.length)}${nameSuffix}`,
+			description: monitor.description,
+			type: "docker",
+			url: dockerUrl,
+			secret: monitor.secret,
+			interval: monitor.interval,
+			notifications: monitor.notifications,
+			tags: monitor.tags,
+			statusWindowSize: monitor.statusWindowSize,
+			statusWindowThreshold: monitor.statusWindowThreshold,
+			ignoreTlsErrors: monitor.ignoreTlsErrors,
+			proxyMode: "inherit",
+			dockerLogsEnabled: false,
+			group: monitor.group,
+		} as Monitor);
 	};
 
 	createMonitors = async (monitors: Array<Monitor>): Promise<Monitor[] | null> => {

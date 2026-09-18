@@ -289,6 +289,11 @@ export interface HardwareDetailsResponse {
 	monitorStats: MonitorStats | null;
 }
 
+export interface DockerDiscoveryResult {
+	containerCount: number;
+	monitorExists: boolean;
+}
+
 export interface DockerStatsBucket {
 	_id: string;
 	avgResponseTime: number | null;
