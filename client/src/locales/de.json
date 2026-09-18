@@ -874,6 +874,14 @@
 					"overview": "Übersicht"
 				}
 			},
+			"dockerDiscovery": {
+				"notice": "Docker-Container auf diesem Host erkannt: {{count}}.",
+				"action": "Docker-Monitor hinzufügen",
+				"dialog": {
+					"title": "Docker-Monitor hinzufügen?",
+					"content": "Einen Docker-Monitor für die {{count}} erkannten Container erstellen? Capture-Endpunkt, Secret, Intervall, Tags, Benachrichtigungen und Statusregeln werden von diesem Infrastruktur-Monitor übernommen."
+				}
+			},
 			"fallback": {
 				"actionButton": "Monitor erstellen!",
 				"title": "Noch keine Infrastruktur-Monitore",

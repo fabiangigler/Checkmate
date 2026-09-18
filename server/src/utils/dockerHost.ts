@@ -13,3 +13,15 @@ export const isCaptureDockerUrl = (url: string | undefined): boolean => {
 		return false;
 	}
 };
+
+export const toCaptureDockerUrl = (url: string | undefined): string | null => {
+	try {
+		const parsed = new URL(url?.trim() ?? "");
+		const pathname = parsed.pathname.replace(/\/+$/, "");
+		if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !pathname.endsWith("/metrics")) return null;
+		parsed.pathname = `${pathname}/docker`;
+		return parsed.toString();
+	} catch {
+		return null;
+	}
+};

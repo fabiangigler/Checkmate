@@ -1084,6 +1084,14 @@
 					"overview": "Overview"
 				}
 			},
+			"dockerDiscovery": {
+				"notice": "Docker containers detected on this host: {{count}}.",
+				"action": "Add Docker monitor",
+				"dialog": {
+					"title": "Add Docker monitor?",
+					"content": "Create a Docker monitor for the {{count}} detected containers? The Capture endpoint, secret, interval, tags, notifications, and status policy will be copied from this infrastructure monitor."
+				}
+			},
 			"fallback": {
 				"actionButton": "Create a monitor",
 				"description": "Track server performance, identify bottlenecks, and ensure reliability with real-time infrastructure monitoring.",

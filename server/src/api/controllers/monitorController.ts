@@ -35,6 +35,8 @@ export interface IMonitorController {
 	getMonitorDomain: RequestHandler;
 	getUptimeDetailsById: RequestHandler;
 	getHardwareDetailsById: RequestHandler;
+	discoverDockerForHardware: RequestHandler;
+	createDockerMonitorFromHardware: RequestHandler;
 	getPageSpeedDetailsById: RequestHandler;
 	getDockerDetailsById: RequestHandler;
 	getDockerContainerByName: RequestHandler;
@@ -136,6 +138,31 @@ class MonitorController implements IMonitorController {
 			data: data,
 		});
 	});
+	discoverDockerForHardware = catchAsync(async (req: Request, res: Response) => {
+		const { monitorId } = getHardwareDetailsByIdParamValidation.parse(req.params);
+		const teamId = requireTeamId(req.user?.teamId);
+		const data = await this.monitorService.discoverDockerForHardware({ teamId, monitorId });
+
+		return res.status(200).json({
+			success: true,
+			msg: "Docker discovery completed successfully",
+			data,
+		});
+	});
+
+	createDockerMonitorFromHardware = catchAsync(async (req: Request, res: Response) => {
+		const { monitorId } = getHardwareDetailsByIdParamValidation.parse(req.params);
+		const teamId = requireTeamId(req.user?.teamId);
+		const userId = requireUserId(req.user?.id);
+		const data = await this.monitorService.createDockerMonitorFromHardware({ teamId, userId, monitorId });
+
+		return res.status(201).json({
+			success: true,
+			msg: "Docker monitor created successfully",
+			data,
+		});
+	});
+
 	getPageSpeedDetailsById = catchAsync(async (req: Request, res: Response) => {
 		const validatedParams = getHardwareDetailsByIdParamValidation.parse(req.params);
 		const validatedQuery = getHardwareDetailsByIdQueryValidation.parse(req.query);

@@ -17,15 +17,20 @@ const SEVERITY_GLYPH: Record<Severity, string> = {
 interface NoticeBannerProps {
 	severity?: Severity;
 	children: React.ReactNode;
+	action?: React.ReactNode;
 }
 
-export const NoticeBanner = ({ severity = "info", children }: NoticeBannerProps) => {
+export const NoticeBanner = ({
+	severity = "info",
+	children,
+	action,
+}: NoticeBannerProps) => {
 	const theme = useTheme();
 	const tone = theme.palette[severity].main;
 	return (
 		<Stack
-			direction="row"
-			alignItems="flex-start"
+			direction={{ xs: "column", sm: "row" }}
+			alignItems={{ xs: "stretch", sm: "center" }}
 			gap={theme.spacing(LAYOUT.SM)}
 			width={"100%"}
 			p={theme.spacing(LAYOUT.MD)}
@@ -34,22 +39,30 @@ export const NoticeBanner = ({ severity = "info", children }: NoticeBannerProps)
 			bgcolor={alpha(tone, 0.08)}
 			textAlign={"left"}
 		>
-			<Box
-				component="span"
-				color={tone}
-				fontSize={typographyLevels.xl}
-				lineHeight={1}
-				mt={LAYOUT.XXS}
-				aria-hidden
+			<Stack
+				direction="row"
+				alignItems="flex-start"
+				gap={theme.spacing(LAYOUT.SM)}
+				flex={1}
 			>
-				{SEVERITY_GLYPH[severity]}
-			</Box>
-			<Typography
-				color={theme.palette.text.primary}
-				lineHeight={1.55}
-			>
-				{children}
-			</Typography>
+				<Box
+					component="span"
+					color={tone}
+					fontSize={typographyLevels.xl}
+					lineHeight={1}
+					mt={LAYOUT.XXS}
+					aria-hidden
+				>
+					{SEVERITY_GLYPH[severity]}
+				</Box>
+				<Typography
+					color={theme.palette.text.primary}
+					lineHeight={1.55}
+				>
+					{children}
+				</Typography>
+			</Stack>
+			{action && <Box flexShrink={0}>{action}</Box>}
 		</Stack>
 	);
 };
